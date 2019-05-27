@@ -6,11 +6,8 @@
 #include <thread>
 #include <assert.h>
 
-#include <boost/config.hpp>
-#include <boost/filesystem.hpp>
 #include <boost/dll/import.hpp>
 #include <boost/dll/shared_library.hpp>
-#include <boost/function.hpp>
 
 #include <wil/result.h>
 
@@ -41,7 +38,7 @@ std::mutex suspendLoopMutex;
 #define NAME_OF(s) #s
 #define NAME_OFW(s) L#s
 
-static void toggle_offscreen() {
+void toggle_offscreen() {
 	const wil::unique_hwnd hwnd(FindWindow(L"grcWindow", L"Grand Theft Auto V"));
 
 	if (hwnd == nullptr) {
@@ -87,16 +84,15 @@ static void toggle_offscreen() {
 	console::print_info("New window position x: %i, y: %i, w: %i, h: %i", x, y, winWidth, winHeight);
 }
 
-
-static bool is_gta_running() {
+bool is_gta_running() {
 	const wil::unique_handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL));
 
 	PROCESSENTRY32 entry;
 	entry.dwSize = sizeof(PROCESSENTRY32);
 
-	if (Process32First(snapshot.get(), &entry) == TRUE) {
-		while (Process32Next(snapshot.get(), &entry) == TRUE) {
-			if (wcscmp(entry.szExeFile, L"GTA5.exe") == 0) {
+	if (Process32First(snapshot.get(), &entry)) {
+		while (Process32Next(snapshot.get(), &entry)) {
+			if (!wcscmp(entry.szExeFile, L"GTA5.exe")) {
 				return true;
 			}
 		}
@@ -105,30 +101,43 @@ static bool is_gta_running() {
 	return false;
 }
 
-static bool suspend_gta() {
+bool set_gta_state(bool suspend) {
 	const wil::unique_handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL));
 
 	PROCESSENTRY32 entry;
 	entry.dwSize = sizeof(PROCESSENTRY32);
 
-	if (Process32First(snapshot.get(), &entry) == TRUE) {
-		while (Process32Next(snapshot.get(), &entry) == TRUE) {
-			if (wcscmp(entry.szExeFile, L"GTA5.exe") == 0) {
+	if (Process32First(snapshot.get(), &entry)) {
+		while (Process32Next(snapshot.get(), &entry)) {
+			if (!wcscmp(entry.szExeFile, L"GTA5.exe")) {
 				const wil::unique_process_handle process(OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID));
 
-				console::print_info("Found %ls (pid: %li, flags: %li, handle: 0x%p)\n", entry.szExeFile, entry.th32ProcessID, entry.dwFlags, process.get());
+				console::print_info("Found %ls (pid: %li, flags: %li, handle: 0x%p)\n", entry.szExeFile,
+					entry.th32ProcessID, entry.dwFlags, process.get());
 
-				if (!process) {
+				if (process.get() == nullptr) {
 					break;
 				}
 
-				console::print_info("Attempting to suspend GTA5");
+				if (suspend) {
+					console::print_info("Attempting to suspend GTA5");
 
-				const LONG ret = NtSuspendProcess(process.get());
-				if (!NT_SUCCESS(ret)) {
-					console::print_error("Failed to suspend GTA5 process (NtSuspendProcess returned 0x%lX)", ret);
-					return false;
+					const LONG ret = NtSuspendProcess(process.get());
+					if (!NT_SUCCESS(ret)) {
+						console::print_error("Failed to suspend GTA5 process (NtSuspendProcess returned 0x%lX)", ret);
+						return false;
+					}
 				}
+				else {
+					console::print_info("Attempting to resume GTA5");
+
+					const LONG ret = NtResumeProcess(process.get());
+					if (!NT_SUCCESS(ret)) {
+						console::print_error("Failed to resume GTA5 process (NtResumeProcess returned 0x%lX)", ret);
+						return false;
+					}
+				}
+
 				return true;
 			}
 		}
@@ -137,47 +146,24 @@ static bool suspend_gta() {
 	return false;
 }
 
-static bool resume_gta() {
-	const wil::unique_handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, NULL));
-
-	PROCESSENTRY32 entry;
-	entry.dwSize = sizeof(PROCESSENTRY32);
-
-	if (Process32First(snapshot.get(), &entry) == TRUE) {
-		while (Process32Next(snapshot.get(), &entry) == TRUE) {
-			if (wcscmp(entry.szExeFile, L"GTA5.exe") == 0) {
-				const wil::unique_process_handle process(OpenProcess(PROCESS_ALL_ACCESS, FALSE, entry.th32ProcessID));
-
-				console::print_info("Found %ls (pid: %li, flags: %li, handle: 0x%p)", entry.szExeFile, entry.th32ProcessID, entry.dwFlags, process.get());
-
-				if (!process) {
-					break;
-				}
-
-				console::print_info("Attempting to resume GTA5");
-
-				const LONG ret = NtResumeProcess(process.get());
-				if (!NT_SUCCESS(ret)) {
-					console::print_error("Failed to resume GTA5 process (NtResumeProcess returned 0x%lX)", ret);
-					return false;
-				}
-				return true;
-			}
-		}
-	}
-
-	return false;
+inline bool suspend_gta() {
+	return set_gta_state(true);
 }
 
-static void suspend_gta_for(std::chrono::milliseconds duration) {
+inline bool resume_gta() {
+	return set_gta_state(false);
+}
+
+void suspend_gta_for(std::chrono::milliseconds duration) {
 	if (suspend_gta()) {
-		console::print_info("Suspending GTA5 for %llu seconds", std::chrono::duration_cast<std::chrono::seconds>(duration).count());
+		console::print_info("Suspending GTA5 for %llu seconds",
+			std::chrono::duration_cast<std::chrono::seconds>(duration).count());
 		Sleep(duration.count());
 		resume_gta();
 	}
 }
 
-static std::string vk_to_string(UCHAR virtualKey) {
+std::string vk_to_string(UCHAR virtualKey) {
 	UINT scanCode = MapVirtualKey(virtualKey, MAPVK_VK_TO_VSC);
 	CHAR szName[128];
 	int result;
@@ -212,7 +198,7 @@ static std::string vk_to_string(UCHAR virtualKey) {
 	return szName;
 }
 
-static std::string get_hotkey_string(const UINT modifiers, const UINT vk) {
+std::string get_hotkey_string(const UINT modifiers, const UINT vk) {
 	std::string str("");
 
 	if (modifiers & MOD_ALT) {
@@ -242,7 +228,7 @@ static std::string get_hotkey_string(const UINT modifiers, const UINT vk) {
 	return str;
 }
 
-static void register_and_check_hotkey(const UINT id, const std::string& name, const UINT modifiers, const UINT vk) {
+void register_and_check_hotkey(const UINT id, const std::string& name, const UINT modifiers, const UINT vk) {
 	assert(id >= 1);
 	assert(modifiers);
 	assert(vk);
@@ -268,7 +254,7 @@ inline std::chrono::time_point<std::chrono::steady_clock> get_finish_time() {
 	return std::chrono::high_resolution_clock::now() + 10s;
 }
 
-static void suspendloop_threadfunc(const std::future<void> futureObj) {
+void suspendloop_threadfunc(const std::future<void> futureObj) {
 	std::lock_guard<std::mutex> usageLock(usageMutex);
 	auto finishTime = get_finish_time();
 	volatile bool suspended = false;
