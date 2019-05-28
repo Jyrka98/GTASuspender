@@ -173,6 +173,7 @@ std::string vk_to_string(UCHAR virtualKey) {
 	case VK_UP:
 	case VK_RIGHT:
 	case VK_DOWN:
+	case VK_LCONTROL:
 	case VK_RCONTROL:
 	case VK_RMENU:
 	case VK_LWIN:
@@ -247,7 +248,7 @@ void register_and_check_hotkey(const UINT id, const std::string& name, const UIN
 
 	getc(stdin);
 
-	exit(0);
+	exit(EXIT_FAILURE);
 }
 
 inline std::chrono::time_point<std::chrono::steady_clock> get_finish_time() {
