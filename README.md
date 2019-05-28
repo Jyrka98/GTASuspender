@@ -1,5 +1,7 @@
 # GTASuspender
 
+![Screenshot](https://i.imgur.com/rexpeWv.png)
+
 This is a standalone program which provides a convenient way to empty a lobby in GTA5 (without injecting any code into the game), instead of doing it manually with Task Manager or Resource Monitor.
 
 It does the following:
